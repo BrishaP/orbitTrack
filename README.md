@@ -1,15 +1,15 @@
 # SpaceJunk / SkySafe
 
 
-Sky Safe
+# Sky Safe 🌌🚀
 
 Sky Safe is an innovative web app designed to track and visualise space debris in real-time, raising awareness about orbital debris and its impact on satellite safety and space missions. The app offers educational insights, collision risk alerts, orbital predictions, and an interactive 3D view of space, making space debris monitoring accessible to everyone.
 
-License
+ # License
 
 Sky Safe is open source and distributed under the MIT License. See the LICENSE file for more details.
 
-Authors
+# Authors
 
 Sky Safe is developed by:
 
@@ -18,9 +18,9 @@ Sky Safe is developed by:
 	•	Hamsa Muse
 	•	Aiden Isbell
 
-    
 
-Sky Safe empowers users to track and understand space debris, contributing to safer satellite operations and a cleaner orbital environment. 🌌🚀
+
+# Sky Safe empowers users to track and understand space debris, contributing to safer satellite operations and a cleaner orbital environment. 🌌🚀
 
 
 
@@ -35,7 +35,7 @@ Table of Contents
 	•	License
 	•	Authors
 
-Features
+# Features
 
 Sky Safe includes a range of tools and visualisations to help users understand and explore space debris and its risks:
 
@@ -60,9 +60,9 @@ Shows regions of high debris density for a visual representation of congested or
 	10.	Interactive 3D Model
 Offers a fully interactive 3D model view of space for an immersive experience.
 
-Installation
+# Installation
 
-Follow these steps to set up Sky Safe locally:
+# Follow these steps to set up Sky Safe locally:
 
 1.	Clone the Repository:
 git clone https://github.com/your-username/sky-safe.git
@@ -83,7 +83,7 @@ npm start
 
 The app will be available at http://localhost:3000.
 
-Usage
+# Usage
 
 After starting Sky Safe, you can:
 
@@ -93,18 +93,18 @@ After starting Sky Safe, you can:
 	•	Explore Debris Education: Learn more about each debris piece through tooltips and facts.
 	•	Simulate Cleanup Missions: Experiment with cleanup methods in simulation mode.
 
-Technologies
+# Technologies
 
-Sky Safe is built with the following technologies:
+# Sky Safe is built with the following technologies:
 
 	•	Frontend: React, Leaflet, Three.js, CesiumJS (for interactive 3D view)
 	•	Backend/API: Space-Track API, custom algorithms for collision detection and orbital prediction
 	•	Styling: CSS, with light/dark mode support
 	•	Data Processing: Node.js (for data fetching and processing), SGP4 library (for orbital mechanics)
 
-Contributing
+# Contributing
 
-We welcome contributions to Sky Safe! To contribute:
+We welcome contributions to Sky Safe! To contribute: Please let us know prior 
 
 	1.	Fork the repository.
 	2.	Create a new branch for your feature or bugfix:
@@ -115,11 +115,11 @@ We welcome contributions to Sky Safe! To contribute:
 
     5.	Create a pull request describing your changes.
 
-License
+# License
 
 Sky Safe is open source and distributed under the MIT License. See the LICENSE file for more details.
 
-Authors
+# Authors
 
 Sky Safe is developed by:
 
@@ -128,4 +128,4 @@ Sky Safe is developed by:
 	•	Hamsa Muse
 	•	Aiden Isbell
 
-Sky Safe empowers users to track and understand space debris, contributing to safer satellite operations and a cleaner orbital environment. 🌌🚀
+# Sky Safe empowers users to track and understand space debris, contributing to safer satellite operations and a cleaner orbital environment. 🌌🚀
