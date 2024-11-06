@@ -102,6 +102,10 @@ After starting Sky Safe, you can:
 	•	Styling: CSS, with light/dark mode support
 	•	Data Processing: Node.js (for data fetching and processing), SGP4 library (for orbital mechanics)
 
+    ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![React](https://img.shields.io/badge/React-17.0.2-61DAFB?logo=react)
+
 # Contributing
 
 We welcome contributions to Sky Safe! To contribute: Please let us know prior 
