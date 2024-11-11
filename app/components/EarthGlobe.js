@@ -5,12 +5,13 @@ import { OrbitControls, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import { TextureLoader } from 'three/src/loaders/TextureLoader'
 import * as satellite from 'satellite.js'
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js';
-import axios from 'axios';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
+import axios from 'axios'
+import { Vector3 } from 'three';
 
 const geoJsonUrl = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master/110m/cultural/ne_110m_admin_0_countries.json'
 
@@ -92,9 +93,33 @@ export default function EarthGlobe() {
     fetchTLEData();
   }, []);
 
+  // Function to calculate the distance between two vectors
+  const calculateDistance = (vec1, vec2) => {
+    return vec1.distanceTo(vec2);
+  };
+
+  // Function to detect potential collisions
+  const detectCollisions = (satellites, threshold) => {
+    const collisions = [];
+    for (let i = 0; i < satellites.length; i++) {
+      for (let j = i + 1; j < satellites.length; j++) {
+        const sat1 = satellites[i];
+        const sat2 = satellites[j];
+        const position1 = new Vector3(sat1.position.x, sat1.position.y, sat1.position.z);
+        const position2 = new Vector3(sat2.position.x, sat2.position.y, sat2.position.z);
+        const distance = calculateDistance(position1, position2);
+        if (distance < threshold) {
+          collisions.push({ sat1, sat2, distance });
+        }
+      }
+    }
+    return collisions;
+  };
+
   function SatelliteComponent({ satellites }) {
     const meshRef = useRef()
     const dummy = new THREE.Object3D()
+    const collisionThreshold = 0.01; // Adjust this value as needed
 
     useEffect(() => {
       const colors = new Float32Array(satellites.length * 3)
@@ -109,15 +134,34 @@ export default function EarthGlobe() {
     }, [satellites])
 
     useFrame(() => {
-      const date = new Date()
+      const date = new Date();
       satellites.forEach((sat, i) => {
-        const positionAndVelocity = satellite.propagate(sat.satrec, date)
-        const positionEci = positionAndVelocity.position
-        dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371)
-        dummy.updateMatrix()
-        meshRef.current.setMatrixAt(i, dummy.matrix)
-      })
-      meshRef.current.instanceMatrix.needsUpdate = true
+        const positionAndVelocity = satellite.propagate(sat.satrec, date);
+        const positionEci = positionAndVelocity.position;
+        dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371);
+        dummy.updateMatrix();
+        meshRef.current.setMatrixAt(i, dummy.matrix);
+        sat.position = dummy.position.clone(); // Store the position for collision detection
+      });
+      meshRef.current.instanceMatrix.needsUpdate = true;
+    
+      // Detect collisions
+      const collisions = detectCollisions(satellites, collisionThreshold);
+      if (collisions.length > 0) {
+        console.log('Potential collisions detected:', collisions);
+        collisions.forEach(({ sat1, sat2 }) => {
+          // Highlight the satellites involved in a collision
+          const index1 = satellites.indexOf(sat1);
+          const index2 = satellites.indexOf(sat2);
+          if (index1 !== -1) {
+            meshRef.current.setColorAt(index1, new THREE.Color(0xff0000)); // Red color for collision
+          }
+          if (index2 !== -1) {
+            meshRef.current.setColorAt(index2, new THREE.Color(0xff0000)); // Red color for collision
+          }
+        });
+        meshRef.current.instanceColor.needsUpdate = true;
+      }
     })
 
     return (
