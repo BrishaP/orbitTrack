@@ -12,8 +12,10 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
 import axios from 'axios'
 import { Vector3 } from 'three';
-import LayersControl from './LayersControl';
-extend({ InstancedMesh: THREE.InstancedMesh, InstancedBufferAttribute: THREE.InstancedBufferAttribute });
+import { Html } from '@react-three/drei';
+
+// Extend the necessary objects to the THREE namespace
+extend({ OutlinePass, EffectComposer, RenderPass, ShaderPass, GammaCorrectionShader });
 
 const geoJsonUrl = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master/110m/cultural/ne_110m_admin_0_countries.json'
 
@@ -39,7 +41,7 @@ const tleSources = [
     file: './data/activesatellite.txt' }  // Active satellites
 ];
 
-function SatelliteComponent({ satellites, hoveredSatellite, setHoveredSatellite }) {
+function SatelliteComponent({ satellites }) {
   const meshRef = useRef();
   const dummy = new THREE.Object3D();
   const collisionThreshold = 0.01; // Adjust this value as needed
@@ -55,7 +57,7 @@ function SatelliteComponent({ satellites, hoveredSatellite, setHoveredSatellite 
     meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
   }, [satellites]);
 
-  useFrame(({ raycaster }) => {
+  useFrame(() => {
     const date = new Date();
     satellites.forEach((sat, i) => {
       const positionAndVelocity = satellite.propagate(sat.satrec, date);
@@ -66,45 +68,135 @@ function SatelliteComponent({ satellites, hoveredSatellite, setHoveredSatellite 
       sat.position = dummy.position.clone();
     });
     meshRef.current.instanceMatrix.needsUpdate = true;
-
-    const intersects = raycaster.intersectObject(meshRef.current);
-    if (intersects.length > 0) {
-      const index = intersects[0].instanceId;
-      setHoveredSatellite(satellites[index]);
-    } else {
-      setHoveredSatellite(null);
-    }
   });
 
   return (
+    <instancedMesh ref={meshRef} args={[null, null, satellites.length]}>
+      <sphereGeometry args={[0.005, 16, 16]}>
+        <instancedBufferAttribute attach="attributes-color" args={[new Float32Array(satellites.length * 3), 3]} />
+      </sphereGeometry>
+      <meshBasicMaterial vertexColors={true} />
+    </instancedMesh>
+  );
+}
+
+function Earth({ earthRef, outlineRef }) {
+  const { scene, camera, gl } = useThree();
+  const [countryLines, setCountryLines] = useState([]);
+  const earthTexture = useLoader(TextureLoader, '/earth-texture.jpg');
+
+  useEffect(() => {
+    fetch(geoJsonUrl)
+      .then(response => response.json())
+      .then(data => {
+        const lines = [];
+        data.features.forEach((feature) => {
+          const color = '#76838c';
+          if (feature.geometry.type === 'Polygon') {
+            feature.geometry.coordinates.forEach((polygon) => {
+              const points = polygon.map(([long, lat]) => latLongToVector3(lat, long));
+              const geometry = new THREE.BufferGeometry().setFromPoints(points);
+              const material = new THREE.LineBasicMaterial({ color, transparent: false, opacity: 1 });
+              const line = new THREE.Line(geometry, material);
+              lines.push(line);
+            });
+          } else if (feature.geometry.type === 'MultiPolygon') {
+            feature.geometry.coordinates.forEach((polygons) => {
+              polygons.forEach((polygon) => {
+                const points = polygon.map(([long, lat]) => latLongToVector3(lat, long));
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({ color, transparent: false, opacity: 1 });
+                const line = new THREE.Line(geometry, material);
+                lines.push(line);
+              });
+            });
+          }
+        });
+        setCountryLines(lines);
+      });
+  }, []);
+
+  useEffect(() => {
+    const composer = new EffectComposer(gl);
+
+    // Render pass for the scene
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    // Outline pass
+    const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+    outlinePass.selectedObjects = [earthRef.current];
+    outlinePass.edgeStrength = 2;
+    outlinePass.edgeThickness = 1;
+    outlinePass.visibleEdgeColor.set('#76838c');
+    composer.addPass(outlinePass);
+
+    // Gamma correction pass
+    const gammaCorrectionPass = new ShaderPass(GammaCorrectionShader);
+    composer.addPass(gammaCorrectionPass);
+
+    const animate = () => {
+      requestAnimationFrame(animate);
+      composer.render();
+    };
+    animate();
+  }, [scene, camera, gl]);
+
+  function latLongToVector3(lat, long, radius = 1.001) {
+    const phi = (90 - lat) * (Math.PI / 180);
+    const theta = (long + 180) * (Math.PI / 180);
+    const x = -(radius * Math.sin(phi) * Math.cos(theta));
+    const z = radius * Math.sin(phi) * Math.sin(theta);
+    const y = radius * Math.cos(phi);
+    return new THREE.Vector3(x, y, z);
+  }
+
+  return (
     <>
-      <instancedMesh ref={meshRef} args={[null, null, satellites.length]}>
-        <sphereGeometry args={[0.005, 16, 16]}>
-          <instancedBufferAttribute attach="attributes-color" args={[new Float32Array(satellites.length * 3), 3]} />
-        </sphereGeometry>
-        <meshBasicMaterial vertexColors={true} />
-      </instancedMesh>
-      {hoveredSatellite && (
-        <div className="satellite-details">
-          <p>Name: {hoveredSatellite.name}</p>
-          <p>Group: {hoveredSatellite.group}</p>
-        </div>
-      )}
+      <mesh ref={earthRef}>
+        <sphereGeometry args={[1, 64, 64]} />
+        <meshStandardMaterial
+          map={earthTexture}
+          transparent={true}
+          opacity={0.95}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {countryLines.map((line, index) => (
+        <primitive key={index} object={line} />
+      ))}
     </>
   );
 }
 
-export default function EarthGlobe({ visibleLayers }) {
+function Moon() {
+  const moonTexture = useLoader(TextureLoader, '/moon-texture.jpg');
+  const moonRef = useRef();
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime() * 0.1; // Scale down the elapsed time to slow down the orbit
+    const distance = 60; // 60 times the Earth's radius
+    moonRef.current.position.set(Math.sin(t) * distance, 0, Math.cos(t) * distance);
+  });
+
+  return (
+    <mesh ref={moonRef}>
+      <sphereGeometry args={[0.27, 32, 32]} /> {/* Moon's radius is about 0.27 times Earth's radius */}
+      <meshStandardMaterial map={moonTexture} emissive={new THREE.Color(0xffffff)} emissiveIntensity={0.5} />
+    </mesh>
+  );
+}
+
+export default function EarthGlobe({ visibleLayers, updateLayerCounts }) {
   const [satellites, setSatellites] = useState([]);
   const earthRef = useRef();
   const outlineRef = useRef();
-  const [hoveredSatellite, setHoveredSatellite] = useState(null);
 
   const fetchTLEData = async () => {
     const lastFetchTime = localStorage.getItem('lastFetchTime');
     const now = new Date().getTime();
     const oneDay = 24 * 60 * 60 * 1000;
-  
+
     if (!lastFetchTime || now - lastFetchTime > oneDay) {
       try {
         await axios.get('/api/update-tle-data');
@@ -113,7 +205,7 @@ export default function EarthGlobe({ visibleLayers }) {
         console.error('Error updating TLE data:', error);
       }
     }
-  
+
     try {
       const filePromises = tleSources.flatMap(source => {
         if (source.group === 'debris') {
@@ -122,9 +214,9 @@ export default function EarthGlobe({ visibleLayers }) {
           return fetch(source.file).then(response => response.text()).then(data => ({ data, color: source.color, group: 'active' }));
         }
       });
-  
+
       const fileResponses = await Promise.all(filePromises);
-  
+
       const newSatellites = fileResponses.flatMap(({ data, color, group }) => {
         const tleLines = data.trim().split('\n');
         const satellites = [];
@@ -142,11 +234,11 @@ export default function EarthGlobe({ visibleLayers }) {
         }
         return satellites;
       });
-  
+
       // Detect collisions
       const collisionThreshold = 0.01; // Adjust this value as needed
       detectCollisions(newSatellites, collisionThreshold);
-  
+
       setSatellites(newSatellites);
     } catch (error) {
       console.error('Error fetching TLE data from local files:', error);
@@ -156,11 +248,15 @@ export default function EarthGlobe({ visibleLayers }) {
   useEffect(() => {
     fetchTLEData();
   }, []);
-  
+
   useEffect(() => {
-    console.log('Satellites:', satellites);
-    console.log('Visible Layers:', visibleLayers);
-  }, [satellites, visibleLayers]);
+    const layerCounts = {
+      debris: satellites.filter(sat => sat.group === 'debris' && !sat.isCollision).length,
+      active: satellites.filter(sat => sat.group === 'active' && !sat.isCollision).length,
+      collisions: satellites.filter(sat => sat.isCollision).length,
+    };
+    updateLayerCounts(layerCounts);
+  }, [satellites]);
 
   // Function to calculate the distance between two vectors
   const calculateDistance = (vec1, vec2) => {
@@ -188,203 +284,6 @@ export default function EarthGlobe({ visibleLayers }) {
     return collisions;
   };
 
-  const handleToggleLayer = (layer, isVisible) => {
-    setVisibleLayers(prev => ({ ...prev, [layer]: isVisible }));
-  };
-
-  class Quadtree {
-    constructor(boundary, capacity) {
-      this.boundary = boundary; // A boundary is a rectangle
-      this.capacity = capacity; // Maximum number of points per quad
-      this.points = [];
-      this.divided = false;
-    }
-  
-    subdivide() {
-      const { x, y, w, h } = this.boundary;
-      const nw = new Rectangle(x, y, w / 2, h / 2);
-      const ne = new Rectangle(x + w / 2, y, w / 2, h / 2);
-      const sw = new Rectangle(x, y + h / 2, w / 2, h / 2);
-      const se = new Rectangle(x + w / 2, y + h / 2, w / 2, h / 2);
-      this.northwest = new Quadtree(nw, this.capacity);
-      this.northeast = new Quadtree(ne, this.capacity);
-      this.southwest = new Quadtree(sw, this.capacity);
-      this.southeast = new Quadtree(se, this.capacity);
-      this.divided = true;
-    }
-  
-    insert(point) {
-      if (!this.boundary.contains(point)) {
-        return false;
-      }
-  
-      if (this.points.length < this.capacity) {
-        this.points.push(point);
-        return true;
-      } else {
-        if (!this.divided) {
-          this.subdivide();
-        }
-        if (this.northwest.insert(point)) return true;
-        if (this.northeast.insert(point)) return true;
-        if (this.southwest.insert(point)) return true;
-        if (this.southeast.insert(point)) return true;
-      }
-    }
-  
-    query(range, found) {
-      if (!found) {
-        found = [];
-      }
-      if (!this.boundary.intersects(range)) {
-        return found;
-      } else {
-        for (let p of this.points) {
-          if (range.contains(p)) {
-            found.push(p);
-          }
-        }
-        if (this.divided) {
-          this.northwest.query(range, found);
-          this.northeast.query(range, found);
-          this.southwest.query(range, found);
-          this.southeast.query(range, found);
-        }
-        return found;
-      }
-    }
-  }
-  
-  class Rectangle {
-    constructor(x, y, w, h) {
-      this.x = x;
-      this.y = y;
-      this.w = w;
-      this.h = h;
-    }
-  
-    contains(point) {
-      return (point.x >= this.x - this.w &&
-              point.x < this.x + this.w &&
-              point.y >= this.y - this.h &&
-              point.y < this.y + this.h);
-    }
-  
-    intersects(range) {
-      return !(range.x - range.w > this.x + this.w ||
-               range.x + range.w < this.x - this.w ||
-               range.y - range.h > this.y + this.h ||
-               range.y + range.h < this.y - this.h);
-    }
-  }
-
-  function Earth({ earthRef, outlineRef }) {
-    const { scene, camera, gl } = useThree();
-    const [countryLines, setCountryLines] = useState([])
-    const earthTexture = useLoader(TextureLoader, '/earth-texture.jpg')
-
-    useEffect(() => {
-      fetch(geoJsonUrl)
-        .then(response => response.json())
-        .then(data => {
-          const lines = []
-          data.features.forEach((feature) => {
-            const color = '#76838c'
-            if (feature.geometry.type === 'Polygon') {
-              feature.geometry.coordinates.forEach((polygon) => {
-                const points = polygon.map(([long, lat]) => latLongToVector3(lat, long))
-                const geometry = new THREE.BufferGeometry().setFromPoints(points)
-                const material = new THREE.LineBasicMaterial({ color, transparent: false, opacity: 1 })
-                const line = new THREE.Line(geometry, material)
-                lines.push(line)
-              })
-            } else if (feature.geometry.type === 'MultiPolygon') {
-              feature.geometry.coordinates.forEach((polygons) => {
-                polygons.forEach((polygon) => {
-                  const points = polygon.map(([long, lat]) => latLongToVector3(lat, long))
-                  const geometry = new THREE.BufferGeometry().setFromPoints(points)
-                  const material = new THREE.LineBasicMaterial({ color, transparent: false, opacity: 1 })
-                  const line = new THREE.Line(geometry, material)
-                  lines.push(line)
-                })
-              })
-            }
-          })
-          setCountryLines(lines)
-        })
-    }, [])
-
-    useEffect(() => {
-      const composer = new EffectComposer(gl);
-    
-      // Render pass for the scene
-      const renderPass = new RenderPass(scene, camera);
-      composer.addPass(renderPass);
-    
-      // Outline pass
-      const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
-      outlinePass.selectedObjects = [earthRef.current];
-      outlinePass.edgeStrength = 2;
-      outlinePass.edgeThickness = 1;
-      outlinePass.visibleEdgeColor.set('#76838c');
-      composer.addPass(outlinePass);
-    
-      // Gamma correction pass
-      const gammaCorrectionPass = new ShaderPass(GammaCorrectionShader);
-      composer.addPass(gammaCorrectionPass);
-    
-      const animate = () => {
-        requestAnimationFrame(animate);
-        composer.render();
-      };
-      animate();
-    }, [scene, camera, gl]);
-
-    function latLongToVector3(lat, long, radius = 1.001) {
-      const phi = (90 - lat) * (Math.PI / 180)
-      const theta = (long + 180) * (Math.PI / 180)
-      const x = -(radius * Math.sin(phi) * Math.cos(theta))
-      const z = radius * Math.sin(phi) * Math.sin(theta)
-      const y = radius * Math.cos(phi)
-      return new THREE.Vector3(x, y, z)
-    }
-
-    return (
-      <>
-        <mesh ref={earthRef}>
-          <sphereGeometry args={[1, 64, 64]} />
-          <meshStandardMaterial
-            map={earthTexture}
-            transparent={true} 
-            opacity={0.95} 
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {countryLines.map((line, index) => (
-          <primitive key={index} object={line} />
-        ))}
-      </>
-    )
-  }
-
-  function Moon() {
-    const moonTexture = useLoader(TextureLoader, '/moon-texture.jpg')
-    const moonRef = useRef()
-  
-    useFrame(({ clock }) => {
-      const t = clock.getElapsedTime() * 0.1; // Scale down the elapsed time to slow down the orbit
-      const distance = 60; // 60 times the Earth's radius
-      moonRef.current.position.set(Math.sin(t) * distance, 0, Math.cos(t) * distance)
-    })
-  
-    return (
-      <mesh ref={moonRef}>
-      <sphereGeometry args={[0.27, 32, 32]} /> {/* Moon's radius is about 0.27 times Earth's radius */}
-      <meshStandardMaterial map={moonTexture} emissive={new THREE.Color(0xffffff)} emissiveIntensity={0.5} />
-      </mesh>
-    )
-  }
-
   return (
     <div className="w-full h-full bg-black">
       <Canvas camera={{ position: [0, 0, 2.5] }} className="w-full h-full" style={{ width: '100%', height: '100vh', aspectRatio: 'auto' }}>
@@ -392,9 +291,9 @@ export default function EarthGlobe({ visibleLayers }) {
         <pointLight position={[10, 10, 10]} />
         <Earth earthRef={earthRef} outlineRef={outlineRef} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-        {visibleLayers.debris && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'debris' && !sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
-        {visibleLayers.active && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'active' && !sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
-        {visibleLayers.collisions && <SatelliteComponent satellites={satellites.filter(sat => sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
+        {visibleLayers.debris && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'debris' && !sat.isCollision)} />}
+        {visibleLayers.active && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'active' && !sat.isCollision)} />}
+        {visibleLayers.collisions && <SatelliteComponent satellites={satellites.filter(sat => sat.isCollision)} />}
         <Moon />
         <OrbitControls enableZoom={true} enablePan={true} enableRotate={true} />
       </Canvas>

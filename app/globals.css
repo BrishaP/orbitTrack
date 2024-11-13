@@ -47,5 +47,18 @@ body,
 
 .layers-control {
   display: grid;
-  gap: 2rem;
+  gap: 1rem;
+}
+
+.layer-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.layer-color {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
 }
