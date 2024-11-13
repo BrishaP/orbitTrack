@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useEffect, useState } from 'react'
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useLoader, useThree, extend } from '@react-three/fiber'
 import { OrbitControls, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import { TextureLoader } from 'three/src/loaders/TextureLoader'
@@ -12,6 +12,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
 import axios from 'axios'
 import { Vector3 } from 'three';
+import LayersControl from './LayersControl';
+extend({ InstancedMesh: THREE.InstancedMesh, InstancedBufferAttribute: THREE.InstancedBufferAttribute });
 
 const geoJsonUrl = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master/110m/cultural/ne_110m_admin_0_countries.json'
 
@@ -37,10 +39,66 @@ const tleSources = [
     file: './data/activesatellite.txt' }  // Active satellites
 ];
 
-export default function EarthGlobe() {
+function SatelliteComponent({ satellites, hoveredSatellite, setHoveredSatellite }) {
+  const meshRef = useRef();
+  const dummy = new THREE.Object3D();
+  const collisionThreshold = 0.01; // Adjust this value as needed
+
+  useEffect(() => {
+    const colors = new Float32Array(satellites.length * 3);
+    satellites.forEach((sat, i) => {
+      const baseColor = sat.isCollision ? new THREE.Color(0xFFFF00) : new THREE.Color(sat.color); // Yellow for collisions
+      const shadeFactor = 0.8 + Math.random() * 0.4;
+      const finalColor = baseColor.clone().multiplyScalar(shadeFactor);
+      colors.set([finalColor.r, finalColor.g, finalColor.b], i * 3);
+    });
+    meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
+  }, [satellites]);
+
+  useFrame(({ raycaster }) => {
+    const date = new Date();
+    satellites.forEach((sat, i) => {
+      const positionAndVelocity = satellite.propagate(sat.satrec, date);
+      const positionEci = positionAndVelocity.position;
+      dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+      sat.position = dummy.position.clone();
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
+
+    const intersects = raycaster.intersectObject(meshRef.current);
+    if (intersects.length > 0) {
+      const index = intersects[0].instanceId;
+      setHoveredSatellite(satellites[index]);
+    } else {
+      setHoveredSatellite(null);
+    }
+  });
+
+  return (
+    <>
+      <instancedMesh ref={meshRef} args={[null, null, satellites.length]}>
+        <sphereGeometry args={[0.005, 16, 16]}>
+          <instancedBufferAttribute attach="attributes-color" args={[new Float32Array(satellites.length * 3), 3]} />
+        </sphereGeometry>
+        <meshBasicMaterial vertexColors={true} />
+      </instancedMesh>
+      {hoveredSatellite && (
+        <div className="satellite-details">
+          <p>Name: {hoveredSatellite.name}</p>
+          <p>Group: {hoveredSatellite.group}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function EarthGlobe({ visibleLayers }) {
   const [satellites, setSatellites] = useState([]);
   const earthRef = useRef();
   const outlineRef = useRef();
+  const [hoveredSatellite, setHoveredSatellite] = useState(null);
 
   const fetchTLEData = async () => {
     const lastFetchTime = localStorage.getItem('lastFetchTime');
@@ -49,7 +107,6 @@ export default function EarthGlobe() {
   
     if (!lastFetchTime || now - lastFetchTime > oneDay) {
       try {
-        // Call the server-side API to update the text files
         await axios.get('/api/update-tle-data');
         localStorage.setItem('lastFetchTime', now);
       } catch (error) {
@@ -60,15 +117,15 @@ export default function EarthGlobe() {
     try {
       const filePromises = tleSources.flatMap(source => {
         if (source.group === 'debris') {
-          return source.files.map(file => fetch(file).then(response => response.text()).then(data => ({ data, color: source.color })));
+          return source.files.map(file => fetch(file).then(response => response.text()).then(data => ({ data, color: source.color, group: source.group })));
         } else {
-          return fetch(source.file).then(response => response.text()).then(data => ({ data, color: source.color }));
+          return fetch(source.file).then(response => response.text()).then(data => ({ data, color: source.color, group: 'active' }));
         }
       });
   
       const fileResponses = await Promise.all(filePromises);
   
-      const newSatellites = fileResponses.flatMap(({ data, color }) => {
+      const newSatellites = fileResponses.flatMap(({ data, color, group }) => {
         const tleLines = data.trim().split('\n');
         const satellites = [];
         for (let i = 0; i < tleLines.length; i += 3) {
@@ -77,21 +134,33 @@ export default function EarthGlobe() {
           const tleLine2 = tleLines[i + 2]?.trim();
           if (tleLine1 && tleLine2) {
             const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
-            satellites.push({ name, tleLine1, tleLine2, satrec, color });
+            const positionAndVelocity = satellite.propagate(satrec, new Date());
+            const positionEci = positionAndVelocity.position;
+            const position = new Vector3(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371);
+            satellites.push({ name, tleLine1, tleLine2, satrec, color, group, position });
           }
         }
         return satellites;
       });
+  
+      // Detect collisions
+      const collisionThreshold = 0.01; // Adjust this value as needed
+      detectCollisions(newSatellites, collisionThreshold);
   
       setSatellites(newSatellites);
     } catch (error) {
       console.error('Error fetching TLE data from local files:', error);
     }
   };
-  
+
   useEffect(() => {
     fetchTLEData();
   }, []);
+  
+  useEffect(() => {
+    console.log('Satellites:', satellites);
+    console.log('Visible Layers:', visibleLayers);
+  }, [satellites, visibleLayers]);
 
   // Function to calculate the distance between two vectors
   const calculateDistance = (vec1, vec2) => {
@@ -105,15 +174,22 @@ export default function EarthGlobe() {
       for (let j = i + 1; j < satellites.length; j++) {
         const sat1 = satellites[i];
         const sat2 = satellites[j];
+        if (!sat1.position || !sat2.position) continue;
         const position1 = new Vector3(sat1.position.x, sat1.position.y, sat1.position.z);
         const position2 = new Vector3(sat2.position.x, sat2.position.y, sat2.position.z);
         const distance = calculateDistance(position1, position2);
         if (distance < threshold) {
           collisions.push({ sat1, sat2, distance });
+          sat1.isCollision = true;
+          sat2.isCollision = true;
         }
       }
     }
     return collisions;
+  };
+
+  const handleToggleLayer = (layer, isVisible) => {
+    setVisibleLayers(prev => ({ ...prev, [layer]: isVisible }));
   };
 
   class Quadtree {
@@ -200,79 +276,6 @@ export default function EarthGlobe() {
                range.y - range.h > this.y + this.h ||
                range.y + range.h < this.y - this.h);
     }
-  }
-
-  function SatelliteComponent({ satellites }) {
-    const meshRef = useRef();
-    const dummy = new THREE.Object3D();
-    const collisionThreshold = 0.01; // Adjust this value as needed
-  
-    useEffect(() => {
-      const colors = new Float32Array(satellites.length * 3);
-      satellites.forEach((sat, i) => {
-        const baseColor = new THREE.Color(sat.color);
-        const shadeFactor = 0.8 + Math.random() * 0.4;
-        const finalColor = baseColor.clone().multiplyScalar(shadeFactor);
-        colors.set([finalColor.r, finalColor.g, finalColor.b], i * 3);
-      });
-      meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
-    }, [satellites]);
-  
-    useFrame(() => {
-      const date = new Date();
-      satellites.forEach((sat, i) => {
-        const positionAndVelocity = satellite.propagate(sat.satrec, date);
-        const positionEci = positionAndVelocity.position;
-        dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371);
-        dummy.updateMatrix();
-        meshRef.current.setMatrixAt(i, dummy.matrix);
-        sat.position = dummy.position.clone();
-      });
-      meshRef.current.instanceMatrix.needsUpdate = true;
-  
-      // Detect collisions using quadtree
-      const boundary = new Rectangle(0, 0, 1, 1);
-      const quadtree = new Quadtree(boundary, 4);
-      satellites.forEach(sat => quadtree.insert(sat.position));
-  
-      const collisions = [];
-      satellites.forEach(sat => {
-        const range = new Rectangle(sat.position.x, sat.position.y, collisionThreshold, collisionThreshold);
-        const points = quadtree.query(range);
-        points.forEach(point => {
-          if (point !== sat.position && calculateDistance(sat.position, point) < collisionThreshold) {
-            collisions.push({ sat1: sat, sat2: satellites.find(s => s.position === point) });
-          }
-        });
-      });
-  
-      if (collisions.length > 0) {
-        console.log('Potential collisions detected:', collisions);
-        const colors = meshRef.current.geometry.attributes.color.array;
-        collisions.forEach(({ sat1, sat2 }) => {
-          const index1 = satellites.indexOf(sat1);
-          const index2 = satellites.indexOf(sat2);
-          if (index1 !== -1) {
-            const yellowColor = new THREE.Color(0xFFFF00);
-            colors.set([yellowColor.r, yellowColor.g, yellowColor.b], index1 * 3); // Yellow color for collision
-          }
-          if (index2 !== -1) {
-            const yellowColor = new THREE.Color(0xFFFF00);
-            colors.set([yellowColor.r, yellowColor.g, yellowColor.b], index2 * 3); // Yellow color for collision
-          }
-        });
-        meshRef.current.geometry.attributes.color.needsUpdate = true;
-      }
-    });
-  
-    return (
-      <instancedMesh ref={meshRef} args={[null, null, satellites.length]}>
-        <sphereGeometry args={[0.005, 16, 16]}>
-          <instancedBufferAttribute attach="attributes-color" args={[new Float32Array(satellites.length * 3), 3]} />
-        </sphereGeometry>
-        <meshBasicMaterial vertexColors={true} />
-      </instancedMesh>
-    );
   }
 
   function Earth({ earthRef, outlineRef }) {
@@ -389,7 +392,9 @@ export default function EarthGlobe() {
         <pointLight position={[10, 10, 10]} />
         <Earth earthRef={earthRef} outlineRef={outlineRef} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-        <SatelliteComponent satellites={satellites} />
+        {visibleLayers.debris && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'debris' && !sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
+        {visibleLayers.active && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'active' && !sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
+        {visibleLayers.collisions && <SatelliteComponent satellites={satellites.filter(sat => sat.isCollision)} hoveredSatellite={hoveredSatellite} setHoveredSatellite={setHoveredSatellite} />}
         <Moon />
         <OrbitControls enableZoom={true} enablePan={true} enableRotate={true} />
       </Canvas>

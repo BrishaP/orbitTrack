@@ -33,3 +33,19 @@ body,
   align-items: stretch;
   height: 100%;
 }
+
+.ui {
+  background: #0000003d;
+  position: absolute;
+  z-index: 10000;
+  padding: 1rem 2rem;
+  border-radius: 0 0 1rem 0;
+  -webkit-backdrop-filter: blur(25px);
+  backdrop-filter: blur(25px);
+  box-shadow: 2px 2px #333333;
+}
+
+.layers-control {
+  display: grid;
+  gap: 2rem;
+}
