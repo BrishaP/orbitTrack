@@ -5,12 +5,13 @@ import { OrbitControls, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import { TextureLoader } from 'three/src/loaders/TextureLoader'
 import * as satellite from 'satellite.js'
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js';
-import axios from 'axios';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
+import axios from 'axios'
+import { Vector3 } from 'three';
 
 const geoJsonUrl = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master/110m/cultural/ne_110m_admin_0_countries.json'
 
@@ -92,34 +93,178 @@ export default function EarthGlobe() {
     fetchTLEData();
   }, []);
 
+  // Function to calculate the distance between two vectors
+  const calculateDistance = (vec1, vec2) => {
+    return vec1.distanceTo(vec2);
+  };
+
+  // Function to detect potential collisions
+  const detectCollisions = (satellites, threshold) => {
+    const collisions = [];
+    for (let i = 0; i < satellites.length; i++) {
+      for (let j = i + 1; j < satellites.length; j++) {
+        const sat1 = satellites[i];
+        const sat2 = satellites[j];
+        const position1 = new Vector3(sat1.position.x, sat1.position.y, sat1.position.z);
+        const position2 = new Vector3(sat2.position.x, sat2.position.y, sat2.position.z);
+        const distance = calculateDistance(position1, position2);
+        if (distance < threshold) {
+          collisions.push({ sat1, sat2, distance });
+        }
+      }
+    }
+    return collisions;
+  };
+
+  class Quadtree {
+    constructor(boundary, capacity) {
+      this.boundary = boundary; // A boundary is a rectangle
+      this.capacity = capacity; // Maximum number of points per quad
+      this.points = [];
+      this.divided = false;
+    }
+  
+    subdivide() {
+      const { x, y, w, h } = this.boundary;
+      const nw = new Rectangle(x, y, w / 2, h / 2);
+      const ne = new Rectangle(x + w / 2, y, w / 2, h / 2);
+      const sw = new Rectangle(x, y + h / 2, w / 2, h / 2);
+      const se = new Rectangle(x + w / 2, y + h / 2, w / 2, h / 2);
+      this.northwest = new Quadtree(nw, this.capacity);
+      this.northeast = new Quadtree(ne, this.capacity);
+      this.southwest = new Quadtree(sw, this.capacity);
+      this.southeast = new Quadtree(se, this.capacity);
+      this.divided = true;
+    }
+  
+    insert(point) {
+      if (!this.boundary.contains(point)) {
+        return false;
+      }
+  
+      if (this.points.length < this.capacity) {
+        this.points.push(point);
+        return true;
+      } else {
+        if (!this.divided) {
+          this.subdivide();
+        }
+        if (this.northwest.insert(point)) return true;
+        if (this.northeast.insert(point)) return true;
+        if (this.southwest.insert(point)) return true;
+        if (this.southeast.insert(point)) return true;
+      }
+    }
+  
+    query(range, found) {
+      if (!found) {
+        found = [];
+      }
+      if (!this.boundary.intersects(range)) {
+        return found;
+      } else {
+        for (let p of this.points) {
+          if (range.contains(p)) {
+            found.push(p);
+          }
+        }
+        if (this.divided) {
+          this.northwest.query(range, found);
+          this.northeast.query(range, found);
+          this.southwest.query(range, found);
+          this.southeast.query(range, found);
+        }
+        return found;
+      }
+    }
+  }
+  
+  class Rectangle {
+    constructor(x, y, w, h) {
+      this.x = x;
+      this.y = y;
+      this.w = w;
+      this.h = h;
+    }
+  
+    contains(point) {
+      return (point.x >= this.x - this.w &&
+              point.x < this.x + this.w &&
+              point.y >= this.y - this.h &&
+              point.y < this.y + this.h);
+    }
+  
+    intersects(range) {
+      return !(range.x - range.w > this.x + this.w ||
+               range.x + range.w < this.x - this.w ||
+               range.y - range.h > this.y + this.h ||
+               range.y + range.h < this.y - this.h);
+    }
+  }
+
   function SatelliteComponent({ satellites }) {
-    const meshRef = useRef()
-    const dummy = new THREE.Object3D()
-
+    const meshRef = useRef();
+    const dummy = new THREE.Object3D();
+    const collisionThreshold = 0.01; // Adjust this value as needed
+  
     useEffect(() => {
-      const colors = new Float32Array(satellites.length * 3)
+      const colors = new Float32Array(satellites.length * 3);
       satellites.forEach((sat, i) => {
-        // Apply a shade variation to the base color
-        const baseColor = new THREE.Color(sat.color)
-        const shadeFactor = 0.8 + Math.random() * 0.4 // Adjust the range as needed
-        const finalColor = baseColor.clone().multiplyScalar(shadeFactor)
-        colors.set([finalColor.r, finalColor.g, finalColor.b], i * 3)
-      })
-      meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3))
-    }, [satellites])
-
+        const baseColor = new THREE.Color(sat.color);
+        const shadeFactor = 0.8 + Math.random() * 0.4;
+        const finalColor = baseColor.clone().multiplyScalar(shadeFactor);
+        colors.set([finalColor.r, finalColor.g, finalColor.b], i * 3);
+      });
+      meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
+    }, [satellites]);
+  
     useFrame(() => {
-      const date = new Date()
+      const date = new Date();
       satellites.forEach((sat, i) => {
-        const positionAndVelocity = satellite.propagate(sat.satrec, date)
-        const positionEci = positionAndVelocity.position
-        dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371)
-        dummy.updateMatrix()
-        meshRef.current.setMatrixAt(i, dummy.matrix)
-      })
-      meshRef.current.instanceMatrix.needsUpdate = true
-    })
-
+        const positionAndVelocity = satellite.propagate(sat.satrec, date);
+        const positionEci = positionAndVelocity.position;
+        dummy.position.set(positionEci.x / 6371, positionEci.z / 6371, -positionEci.y / 6371);
+        dummy.updateMatrix();
+        meshRef.current.setMatrixAt(i, dummy.matrix);
+        sat.position = dummy.position.clone();
+      });
+      meshRef.current.instanceMatrix.needsUpdate = true;
+  
+      // Detect collisions using quadtree
+      const boundary = new Rectangle(0, 0, 1, 1);
+      const quadtree = new Quadtree(boundary, 4);
+      satellites.forEach(sat => quadtree.insert(sat.position));
+  
+      const collisions = [];
+      satellites.forEach(sat => {
+        const range = new Rectangle(sat.position.x, sat.position.y, collisionThreshold, collisionThreshold);
+        const points = quadtree.query(range);
+        points.forEach(point => {
+          if (point !== sat.position && calculateDistance(sat.position, point) < collisionThreshold) {
+            collisions.push({ sat1: sat, sat2: satellites.find(s => s.position === point) });
+          }
+        });
+      });
+  
+      if (collisions.length > 0) {
+        console.log('Potential collisions detected:', collisions);
+        const colors = meshRef.current.geometry.attributes.color.array;
+        collisions.forEach(({ sat1, sat2 }) => {
+          const index1 = satellites.indexOf(sat1);
+          const index2 = satellites.indexOf(sat2);
+          if (index1 !== -1) {
+            const yellowColor = new THREE.Color(0xFFFF00);
+            colors.set([yellowColor.r, yellowColor.g, yellowColor.b], index1 * 3); // Yellow color for collision
+          }
+          if (index2 !== -1) {
+            const yellowColor = new THREE.Color(0xFFFF00);
+            colors.set([yellowColor.r, yellowColor.g, yellowColor.b], index2 * 3); // Yellow color for collision
+          }
+        });
+        meshRef.current.geometry.attributes.color.needsUpdate = true;
+      }
+    });
+  
     return (
       <instancedMesh ref={meshRef} args={[null, null, satellites.length]}>
         <sphereGeometry args={[0.005, 16, 16]}>
@@ -127,7 +272,7 @@ export default function EarthGlobe() {
         </sphereGeometry>
         <meshBasicMaterial vertexColors={true} />
       </instancedMesh>
-    )
+    );
   }
 
   function Earth({ earthRef, outlineRef }) {
