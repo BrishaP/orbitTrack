@@ -48,7 +48,7 @@ body,
 .layers-control,
 .settings {
   margin: .2rem;
-  background: green;
+  /* background: green; */
   display: grid;
   gap: 1rem;
 }
