@@ -3,7 +3,7 @@ import { useRef, useEffect, useState } from 'react'
 import { Canvas, useFrame, useLoader, useThree, extend } from '@react-three/fiber'
 import { OrbitControls, Stars } from '@react-three/drei'
 import * as THREE from 'three'
-import { TextureLoader } from 'three/src/loaders/TextureLoader'
+import { TextureLoader, SRGBColorSpace } from 'three';
 import * as satellite from 'satellite.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
@@ -12,7 +12,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js'
 import axios from 'axios'
 import { Vector3 } from 'three';
-import { Html } from '@react-three/drei';
+import { sRGBEncoding } from 'three';
 
 // Extend the necessary objects to the THREE namespace
 extend({ OutlinePass, EffectComposer, RenderPass, ShaderPass, GammaCorrectionShader });
@@ -80,10 +80,14 @@ function SatelliteComponent({ satellites }) {
   );
 }
 
-function Earth({ earthRef, outlineRef }) {
+function Earth({ earthRef, outlineRef, earthTexture, showOutlines }) {
   const { scene, camera, gl } = useThree();
   const [countryLines, setCountryLines] = useState([]);
-  const earthTexture = useLoader(TextureLoader, '/earth-texture.jpg');
+  const texture = useLoader(TextureLoader, `/${earthTexture}`);
+
+  useEffect(() => {
+    texture.colorSpace = SRGBColorSpace;
+  }, [texture]);
 
   useEffect(() => {
     fetch(geoJsonUrl)
@@ -123,18 +127,6 @@ function Earth({ earthRef, outlineRef }) {
     const renderPass = new RenderPass(scene, camera);
     composer.addPass(renderPass);
 
-    // Outline pass
-    const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
-    outlinePass.selectedObjects = [earthRef.current];
-    outlinePass.edgeStrength = 2;
-    outlinePass.edgeThickness = 1;
-    outlinePass.visibleEdgeColor.set('#76838c');
-    composer.addPass(outlinePass);
-
-    // Gamma correction pass
-    const gammaCorrectionPass = new ShaderPass(GammaCorrectionShader);
-    composer.addPass(gammaCorrectionPass);
-
     const animate = () => {
       requestAnimationFrame(animate);
       composer.render();
@@ -156,13 +148,15 @@ function Earth({ earthRef, outlineRef }) {
       <mesh ref={earthRef}>
         <sphereGeometry args={[1, 64, 64]} />
         <meshStandardMaterial
-          map={earthTexture}
-          transparent={true}
-          opacity={0.95}
+          map={texture}
+          transparent={false}
+          opacity={1}
           side={THREE.DoubleSide}
+          metalness={0.1}
+          roughness={0.7}
         />
       </mesh>
-      {countryLines.map((line, index) => (
+      {showOutlines && countryLines.map((line, index) => (
         <primitive key={index} object={line} />
       ))}
     </>
@@ -187,7 +181,7 @@ function Moon() {
   );
 }
 
-export default function EarthGlobe({ visibleLayers, updateLayerCounts }) {
+export default function EarthGlobe({ visibleLayers, updateLayerCounts, earthTexture, brightness, showOutlines }) {
   const [satellites, setSatellites] = useState([]);
   const earthRef = useRef();
   const outlineRef = useRef();
@@ -286,10 +280,17 @@ export default function EarthGlobe({ visibleLayers, updateLayerCounts }) {
 
   return (
     <div className="w-full h-full bg-black">
-      <Canvas camera={{ position: [0, 0, 2.5] }} className="w-full h-full" style={{ width: '100%', height: '100vh', aspectRatio: 'auto' }}>
-        <ambientLight intensity={0.25} />
-        <pointLight position={[10, 10, 10]} />
-        <Earth earthRef={earthRef} outlineRef={outlineRef} />
+      <Canvas
+        camera={{ position: [0, 0, 2.5] }}
+        className="w-full h-full"
+        style={{ width: '100%', height: '100vh', aspectRatio: 'auto' }}
+        onCreated={({ gl }) => {
+          gl.outputEncoding = sRGBEncoding;
+        }}
+      >
+        <ambientLight intensity={brightness} />
+        <pointLight position={[10, 10, 10]} intensity={1} />
+        <Earth earthRef={earthRef} outlineRef={outlineRef} earthTexture={earthTexture} showOutlines={showOutlines} />
         <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
         {visibleLayers.debris && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'debris' && !sat.isCollision)} />}
         {visibleLayers.active && <SatelliteComponent satellites={satellites.filter(sat => sat.group === 'active' && !sat.isCollision)} />}

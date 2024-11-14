@@ -16,6 +16,7 @@ export default function LayersControl({ onToggleLayer, layerCounts, layerColors 
 
   return (
     <div className="layers-control">
+      <h4 className='ui-header'>Toggle Layers</h4>
       {Object.keys(layers).map((layer) => (
         <label key={layer} className="layer-label">
           <input
